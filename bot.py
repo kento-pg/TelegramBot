@@ -52,17 +52,16 @@ def web_search(query: str) -> str:
         )
         resp.raise_for_status()
         data = resp.json()
+        answer = data.get("answer", "")
         parts = []
-        if data.get("answer"):
-            parts.append(f"Ringkasan: {data['answer']}")
-        for r in data.get("results", [])[:5]:
+        for r in data.get("results", [])[:3]:
             title = r.get("title", "")
-            content = r.get("content", "")[:300]
+            content = r.get("content", "")[:200]
             parts.append(f"• {title}: {content}")
-        return "\n".join(parts)
+        return answer, "\n".join(parts)
     except Exception as e:
         logger.warning(f"Search failed: {e}")
-        return ""
+        return "", ""
 
 
 def send_message(chat_id, text):
@@ -81,18 +80,7 @@ def send_typing(chat_id):
 def ask_groq(chat_id, user_msg):
     msgs = history.setdefault(chat_id, [])
 
-    # Build the message content — inject search results into user message itself
-    content = user_msg
-    if needs_search(user_msg):
-        logger.info(f"Searching web for: {user_msg[:60]}")
-        results = web_search(user_msg)
-        if results:
-            content = (f"Gunakan data web berikut untuk menjawab pertanyaan ini. "
-                       f"Jangan katakan kamu tidak punya akses internet.\n\n"
-                       f"DATA WEB:\n{results}\n\n"
-                       f"PERTANYAAN: {user_msg}")
-
-    msgs.append({"role": "user", "content": content})
+    msgs.append({"role": "user", "content": user_msg})
     if len(msgs) > 10:
         msgs[:] = msgs[-10:]
 
@@ -142,6 +130,15 @@ def handle_update(update):
         return
     try:
         send_typing(chat_id)
+        # For current-info queries, use Tavily answer directly
+        if needs_search(text):
+            answer, details = web_search(text)
+            if answer:
+                reply = f"🔍 {answer}"
+                if details:
+                    reply += f"\n\n{details}"
+                send_message(chat_id, reply)
+                return
         reply = ask_groq(chat_id, text)
         send_message(chat_id, reply)
     except Exception as e:
