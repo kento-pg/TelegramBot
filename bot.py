@@ -1,7 +1,8 @@
 import os
-import asyncio
+import threading
 import logging
 import requests
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,13 +45,6 @@ def ask_groq(chat_id, user_msg):
     msgs.append({"role": "assistant", "content": reply})
     return reply
 
-def get_updates(offset=None):
-    params = {"timeout": 30}
-    if offset:
-        params["offset"] = offset
-    resp = requests.get(f"{TG_API}/getUpdates", params=params, timeout=35)
-    return resp.json().get("result", [])
-
 def handle_update(update):
     msg     = update.get("message", {})
     chat_id = msg.get("chat", {}).get("id")
@@ -72,19 +66,31 @@ def handle_update(update):
         logger.error(f"Error: {e}")
         send_message(chat_id, "Maaf, terjadi error. Coba lagi.")
 
-def main():
-    # Hapus webhook jika ada
-    requests.post(f"{TG_API}/deleteWebhook", timeout=10)
-    logger.info("Bot started (polling mode)")
+def polling_loop():
+    logger.info("Deleting webhook...")
+    requests.post(f"{TG_API}/deleteWebhook", timeout=15)
+    logger.info("Bot polling started")
     offset = None
     while True:
         try:
-            updates = get_updates(offset)
+            params = {"timeout": 30, "offset": offset} if offset else {"timeout": 30}
+            resp = requests.get(f"{TG_API}/getUpdates", params=params, timeout=40)
+            updates = resp.json().get("result", [])
             for update in updates:
                 handle_update(update)
                 offset = update["update_id"] + 1
         except Exception as e:
             logger.error(f"Polling error: {e}")
 
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+    def log_message(self, *args):
+        pass
+
 if __name__ == "__main__":
-    main()
+    threading.Thread(target=polling_loop, daemon=True).start()
+    logger.info("Health server on port 7860")
+    HTTPServer(("0.0.0.0", 7860), HealthHandler).serve_forever()
