@@ -9,18 +9,64 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 GROQ_API_KEY   = os.environ["GROQ_API_KEY"]
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
 GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
+TAVILY_URL     = "https://api.tavily.com/search"
 TG_API         = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
 SYSTEM_PROMPT = """Kamu adalah asisten pribadi yang cerdas dan helpful.
 Jawab dalam bahasa yang sama dengan pertanyaan pengguna (Indonesia atau Inggris).
 Jawaban harus ringkas, jelas, dan langsung ke intinya."""
 
+SEARCH_KEYWORDS = [
+    "hari ini", "sekarang", "terbaru", "kemarin", "minggu ini", "bulan ini",
+    "harga", "berapa", "naik", "turun", "berita", "kondisi", "update",
+    "today", "latest", "current", "now", "recent", "news",
+    "price", "how much", "what happened", "market",
+]
+
 history: dict[int, list] = {}
+
+
+def needs_search(text: str) -> bool:
+    t = text.lower()
+    return any(kw in t for kw in SEARCH_KEYWORDS)
+
+
+def web_search(query: str) -> str:
+    if not TAVILY_API_KEY:
+        return ""
+    try:
+        resp = requests.post(
+            TAVILY_URL,
+            json={
+                "api_key": TAVILY_API_KEY,
+                "query": query,
+                "search_depth": "basic",
+                "max_results": 5,
+                "include_answer": True,
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        parts = []
+        if data.get("answer"):
+            parts.append(f"Ringkasan: {data['answer']}")
+        for r in data.get("results", [])[:5]:
+            title = r.get("title", "")
+            content = r.get("content", "")[:300]
+            parts.append(f"• {title}: {content}")
+        return "\n".join(parts)
+    except Exception as e:
+        logger.warning(f"Search failed: {e}")
+        return ""
+
 
 def send_message(chat_id, text):
     requests.post(f"{TG_API}/sendMessage",
                   json={"chat_id": chat_id, "text": text}, timeout=10)
+
 
 def send_typing(chat_id):
     try:
@@ -29,11 +75,19 @@ def send_typing(chat_id):
     except Exception:
         pass
 
+
 def ask_groq(chat_id, user_msg):
     msgs = history.setdefault(chat_id, [])
     msgs.append({"role": "user", "content": user_msg})
     if len(msgs) > 10:
         msgs[:] = msgs[-10:]
+
+    system = SYSTEM_PROMPT
+    if needs_search(user_msg):
+        logger.info(f"Searching web for: {user_msg[:60]}")
+        results = web_search(user_msg)
+        if results:
+            system = SYSTEM_PROMPT + f"\n\nINFO TERKINI DARI WEB (gunakan sebagai referensi):\n{results}"
 
     for attempt in range(3):
         try:
@@ -42,7 +96,7 @@ def ask_groq(chat_id, user_msg):
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}",
                          "Content-Type": "application/json"},
                 json={"model": "llama-3.1-8b-instant",
-                      "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + msgs,
+                      "messages": [{"role": "system", "content": system}] + msgs,
                       "max_tokens": 1024, "temperature": 0.7},
                 timeout=45,
             )
@@ -56,6 +110,7 @@ def ask_groq(chat_id, user_msg):
                 raise
     raise RuntimeError("Groq failed after 3 attempts")
 
+
 def handle_update(update):
     msg     = update.get("message", {})
     chat_id = msg.get("chat", {}).get("id")
@@ -63,7 +118,7 @@ def handle_update(update):
     if not chat_id or not text:
         return
     if text.startswith("/start"):
-        send_message(chat_id, "Halo! Saya asisten AI Anda. Tanya apa saja!")
+        send_message(chat_id, "Halo! Saya asisten AI Anda. Tanya apa saja — termasuk berita dan harga terkini!")
         return
     if text.startswith("/clear"):
         history.pop(chat_id, None)
@@ -76,6 +131,7 @@ def handle_update(update):
     except Exception as e:
         logger.error(f"Error: {e}")
         send_message(chat_id, "Maaf, terjadi error. Coba lagi.")
+
 
 def polling_loop():
     logger.info("Deleting webhook...")
@@ -93,6 +149,7 @@ def polling_loop():
         except Exception as e:
             logger.error(f"Polling error: {e}")
 
+
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -100,6 +157,7 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"OK")
     def log_message(self, *args):
         pass
+
 
 if __name__ == "__main__":
     threading.Thread(target=polling_loop, daemon=True).start()
