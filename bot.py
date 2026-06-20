@@ -139,11 +139,11 @@ def handle_update(update):
         # For current-info queries, use Tavily answer directly
         if needs_search(text):
             answer, details = web_search(text)
-            if answer:
-                reply = f"🔍 {answer}"
+            if answer or details:
+                reply = f"🔍 {answer}" if answer else ""
                 if details:
-                    reply += f"\n\n{details}"
-                send_message(chat_id, reply)
+                    reply += ("\n\n" if reply else "") + details
+                send_message(chat_id, reply.strip())
                 return
         reply = ask_groq(chat_id, text)
         send_message(chat_id, reply)
