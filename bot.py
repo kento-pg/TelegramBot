@@ -26,17 +26,19 @@ SEARCH_KEYWORDS = [
     "price", "how much", "what happened", "market",
 ]
 
-CRYPTO_MAP = {
-    "btc": "bitcoin", "bitcoin": "bitcoin",
-    "eth": "ethereum", "ethereum": "ethereum",
-    "sol": "solana", "solana": "solana",
-    "bnb": "binancecoin",
-    "xrp": "ripple",
-    "doge": "dogecoin",
-    "ada": "cardano",
-    "avax": "avalanche-2",
-    "dot": "polkadot",
-    "matic": "matic-network",
+BINANCE_SYMBOLS = {
+    "btc": "BTCUSDT", "bitcoin": "BTCUSDT",
+    "eth": "ETHUSDT", "ethereum": "ETHUSDT",
+    "sol": "SOLUSDT", "solana": "SOLUSDT",
+    "bnb": "BNBUSDT",
+    "xrp": "XRPUSDT",
+    "doge": "DOGEUSDT",
+    "ada": "ADAUSDT",
+    "avax": "AVAXUSDT",
+    "dot": "DOTUSDT",
+    "matic": "MATICUSDT",
+    "link": "LINKUSDT",
+    "uni": "UNIUSDT",
 }
 
 logger.info(f"TAVILY_API_KEY loaded: {'YES' if TAVILY_API_KEY else 'NO'}")
@@ -50,24 +52,23 @@ def needs_search(text: str) -> bool:
 
 
 def get_crypto_price(text: str) -> str:
-    """Fetch live crypto price from CoinGecko (no API key needed)."""
+    """Fetch live crypto price from Binance (no API key, no rate limit)."""
     t = text.lower()
-    coin_id = next((CRYPTO_MAP[k] for k in CRYPTO_MAP if k in t), None)
-    if not coin_id:
+    symbol = next((BINANCE_SYMBOLS[k] for k in BINANCE_SYMBOLS if k in t), None)
+    if not symbol:
         return ""
     try:
         resp = requests.get(
-            "https://api.coingecko.com/api/v3/simple/price",
-            params={"ids": coin_id, "vs_currencies": "usd,idr"},
-            timeout=10,
+            "https://api.binance.com/api/v3/ticker/price",
+            params={"symbol": symbol},
+            timeout=8,
         )
         data = resp.json()
-        usd = data[coin_id]["usd"]
-        idr = data[coin_id]["idr"]
-        name = coin_id.capitalize()
-        return f"💰 {name}: ${usd:,.2f} USD (Rp {idr:,.0f})"
+        price = float(data["price"])
+        coin = symbol.replace("USDT", "")
+        return f"💰 {coin}: ${price:,.2f} USDT (Binance, realtime)"
     except Exception as e:
-        logger.warning(f"CoinGecko failed: {e}")
+        logger.warning(f"Binance failed: {e}")
         return ""
 
 
@@ -151,20 +152,20 @@ def handle_update(update):
         send_message(chat_id, "Riwayat percakapan dihapus.")
         return
     if text.startswith("/debug"):
-        ddg_test = "BELUM DITEST"
+        # Test 1: Binance crypto price
+        binance_test = get_crypto_price("btc") or "GAGAL ✗"
+        # Test 2: Google News RSS
+        news_test = "GAGAL ✗"
         try:
-            answer, _ = web_search("bitcoin price today")
-            ddg_test = f"OK ✓ — {answer[:80]}" if answer else "GAGAL (answer kosong)"
+            answer, details = web_search("bitcoin")
+            news_test = f"OK ✓ — {details[:80]}" if (answer or details) else "KOSONG"
         except Exception as e:
-            ddg_test = f"ERROR: {e}"
-        try:
-            send_message(chat_id,
-                f"GROQ: {'SET ✓' if GROQ_API_KEY else 'KOSONG ✗'}\n"
-                f"DuckDuckGo: {ddg_test}\n"
-                f"CoinGecko: {get_crypto_price('btc') or 'GAGAL'}"
-            )
-        except Exception as e:
-            logger.error(f"Debug send failed: {e}")
+            news_test = f"ERROR: {str(e)[:60]}"
+        send_message(chat_id,
+            f"GROQ: {'SET ✓' if GROQ_API_KEY else 'KOSONG ✗'}\n"
+            f"Binance price: {binance_test}\n"
+            f"Google News: {news_test}"
+        )
         return
     try:
         send_typing(chat_id)
