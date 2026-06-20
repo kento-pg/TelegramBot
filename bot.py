@@ -23,27 +23,38 @@ def send_message(chat_id, text):
                   json={"chat_id": chat_id, "text": text}, timeout=10)
 
 def send_typing(chat_id):
-    requests.post(f"{TG_API}/sendChatAction",
-                  json={"chat_id": chat_id, "action": "typing"}, timeout=5)
+    try:
+        requests.post(f"{TG_API}/sendChatAction",
+                      json={"chat_id": chat_id, "action": "typing"}, timeout=8)
+    except Exception:
+        pass
 
 def ask_groq(chat_id, user_msg):
     msgs = history.setdefault(chat_id, [])
     msgs.append({"role": "user", "content": user_msg})
-    if len(msgs) > 20:
-        msgs[:] = msgs[-20:]
-    resp = requests.post(
-        GROQ_URL,
-        headers={"Authorization": f"Bearer {GROQ_API_KEY}",
-                 "Content-Type": "application/json"},
-        json={"model": "llama-3.1-8b-instant",
-              "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + msgs,
-              "max_tokens": 1024, "temperature": 0.7},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    reply = resp.json()["choices"][0]["message"]["content"]
-    msgs.append({"role": "assistant", "content": reply})
-    return reply
+    if len(msgs) > 10:
+        msgs[:] = msgs[-10:]
+
+    for attempt in range(3):
+        try:
+            resp = requests.post(
+                GROQ_URL,
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
+                         "Content-Type": "application/json"},
+                json={"model": "llama-3.1-8b-instant",
+                      "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + msgs,
+                      "max_tokens": 1024, "temperature": 0.7},
+                timeout=45,
+            )
+            resp.raise_for_status()
+            reply = resp.json()["choices"][0]["message"]["content"]
+            msgs.append({"role": "assistant", "content": reply})
+            return reply
+        except Exception as e:
+            logger.warning(f"Groq attempt {attempt+1} failed: {e}")
+            if attempt == 2:
+                raise
+    raise RuntimeError("Groq failed after 3 attempts")
 
 def handle_update(update):
     msg     = update.get("message", {})
