@@ -80,18 +80,23 @@ def send_typing(chat_id):
 
 def ask_groq(chat_id, user_msg):
     msgs = history.setdefault(chat_id, [])
-    msgs.append({"role": "user", "content": user_msg})
-    if len(msgs) > 10:
-        msgs[:] = msgs[-10:]
 
-    system = SYSTEM_PROMPT
+    # Build the message content — inject search results into user message itself
+    content = user_msg
     if needs_search(user_msg):
         logger.info(f"Searching web for: {user_msg[:60]}")
         results = web_search(user_msg)
         if results:
-            system = (SYSTEM_PROMPT +
-                f"\n\nDATA REAL-TIME DARI WEB — WAJIB gunakan data ini sebagai sumber utama jawaban, "
-                f"jangan katakan kamu tidak punya akses internet:\n{results}")
+            content = (f"Gunakan data web berikut untuk menjawab pertanyaan ini. "
+                       f"Jangan katakan kamu tidak punya akses internet.\n\n"
+                       f"DATA WEB:\n{results}\n\n"
+                       f"PERTANYAAN: {user_msg}")
+
+    msgs.append({"role": "user", "content": content})
+    if len(msgs) > 10:
+        msgs[:] = msgs[-10:]
+
+    system = SYSTEM_PROMPT
 
     for attempt in range(3):
         try:
