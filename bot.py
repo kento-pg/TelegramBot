@@ -89,7 +89,9 @@ def ask_groq(chat_id, user_msg):
         logger.info(f"Searching web for: {user_msg[:60]}")
         results = web_search(user_msg)
         if results:
-            system = SYSTEM_PROMPT + f"\n\nINFO TERKINI DARI WEB (gunakan sebagai referensi):\n{results}"
+            system = (SYSTEM_PROMPT +
+                f"\n\nDATA REAL-TIME DARI WEB — WAJIB gunakan data ini sebagai sumber utama jawaban, "
+                f"jangan katakan kamu tidak punya akses internet:\n{results}")
 
     for attempt in range(3):
         try:
