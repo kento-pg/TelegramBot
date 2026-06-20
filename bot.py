@@ -2,6 +2,7 @@ import os
 import threading
 import logging
 import requests
+import xml.etree.ElementTree as ET
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 logging.basicConfig(level=logging.INFO)
@@ -70,32 +71,25 @@ def get_crypto_price(text: str) -> str:
         return ""
 
 
-def web_search(query: str) -> str:
-    if not TAVILY_API_KEY:
-        return ""
+def web_search(query: str) -> tuple[str, str]:
+    """Fetch latest news from Google News RSS (no API key needed)."""
     try:
-        resp = requests.post(
-            TAVILY_URL,
-            json={
-                "api_key": TAVILY_API_KEY,
-                "query": query,
-                "search_depth": "basic",
-                "max_results": 5,
-                "include_answer": True,
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        answer = data.get("answer", "")
-        parts = []
-        for r in data.get("results", [])[:3]:
-            title = r.get("title", "")
-            content = r.get("content", "")[:200]
-            parts.append(f"• {title}: {content}")
-        return answer, "\n".join(parts)
+        url = "https://news.google.com/rss/search"
+        resp = requests.get(url, params={"q": query, "hl": "id", "gl": "ID", "ceid": "ID:id"},
+                            timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        root = ET.fromstring(resp.content)
+        items = root.findall(".//item")[:5]
+        headlines = []
+        for item in items:
+            title = item.findtext("title", "").split(" - ")[0].strip()
+            desc = item.findtext("description", "")[:150].strip()
+            if title:
+                headlines.append(f"• {title}: {desc}" if desc else f"• {title}")
+        if not headlines:
+            return "", ""
+        return f"Berita terbaru tentang '{query}':", "\n".join(headlines)
     except Exception as e:
-        logger.warning(f"Search failed: {e}")
+        logger.warning(f"News search failed: {e}")
         return "", ""
 
 
@@ -157,17 +151,20 @@ def handle_update(update):
         send_message(chat_id, "Riwayat percakapan dihapus.")
         return
     if text.startswith("/debug"):
-        tavily_test = "BELUM DITEST"
+        ddg_test = "BELUM DITEST"
         try:
             answer, _ = web_search("bitcoin price today")
-            tavily_test = f"OK ✓ — {answer[:80]}" if answer else "GAGAL (answer kosong)"
+            ddg_test = f"OK ✓ — {answer[:80]}" if answer else "GAGAL (answer kosong)"
         except Exception as e:
-            tavily_test = f"ERROR: {e}"
-        send_message(chat_id,
-            f"TAVILY_API_KEY: {'SET ✓' if TAVILY_API_KEY else 'KOSONG ✗'}\n"
-            f"GROQ_API_KEY: {'SET ✓' if GROQ_API_KEY else 'KOSONG ✗'}\n"
-            f"Tavily test: {tavily_test}"
-        )
+            ddg_test = f"ERROR: {e}"
+        try:
+            send_message(chat_id,
+                f"GROQ: {'SET ✓' if GROQ_API_KEY else 'KOSONG ✗'}\n"
+                f"DuckDuckGo: {ddg_test}\n"
+                f"CoinGecko: {get_crypto_price('btc') or 'GAGAL'}"
+            )
+        except Exception as e:
+            logger.error(f"Debug send failed: {e}")
         return
     try:
         send_typing(chat_id)
