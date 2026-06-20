@@ -122,10 +122,16 @@ def handle_update(update):
         send_message(chat_id, "Riwayat percakapan dihapus.")
         return
     if text.startswith("/debug"):
+        tavily_test = "BELUM DITEST"
+        try:
+            answer, _ = web_search("bitcoin price today")
+            tavily_test = f"OK ✓ — {answer[:80]}" if answer else "GAGAL (answer kosong)"
+        except Exception as e:
+            tavily_test = f"ERROR: {e}"
         send_message(chat_id,
             f"TAVILY_API_KEY: {'SET ✓' if TAVILY_API_KEY else 'KOSONG ✗'}\n"
             f"GROQ_API_KEY: {'SET ✓' if GROQ_API_KEY else 'KOSONG ✗'}\n"
-            f"needs_search test: {needs_search('harga btc skrg')}"
+            f"Tavily test: {tavily_test}"
         )
         return
     try:
