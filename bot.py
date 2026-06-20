@@ -19,11 +19,13 @@ Jawab dalam bahasa yang sama dengan pertanyaan pengguna (Indonesia atau Inggris)
 Jawaban harus ringkas, jelas, dan langsung ke intinya."""
 
 SEARCH_KEYWORDS = [
-    "hari ini", "sekarang", "terbaru", "kemarin", "minggu ini", "bulan ini",
+    "hari ini", "sekarang", "skrg", "terbaru", "kemarin", "minggu ini", "bulan ini",
     "harga", "berapa", "naik", "turun", "berita", "kondisi", "update",
     "today", "latest", "current", "now", "recent", "news",
     "price", "how much", "what happened", "market",
 ]
+
+logger.info(f"TAVILY_API_KEY loaded: {'YES' if TAVILY_API_KEY else 'NO'}")
 
 history: dict[int, list] = {}
 
