@@ -105,6 +105,5 @@ def set_webhook():
     logger.info(f"Webhook set: {r.json()}")
 
 if __name__ == "__main__":
-    set_webhook()
     logger.info(f"Starting webhook server on port {PORT}")
     app_flask.run(host="0.0.0.0", port=PORT)
