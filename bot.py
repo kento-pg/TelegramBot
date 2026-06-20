@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 GROQ_API_KEY   = os.environ["GROQ_API_KEY"]
-TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "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")
 GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
 TAVILY_URL     = "https://api.tavily.com/search"
 TG_API         = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
