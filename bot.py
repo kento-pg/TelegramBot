@@ -126,6 +126,13 @@ def handle_update(update):
         history.pop(chat_id, None)
         send_message(chat_id, "Riwayat percakapan dihapus.")
         return
+    if text.startswith("/debug"):
+        send_message(chat_id,
+            f"TAVILY_API_KEY: {'SET ✓' if TAVILY_API_KEY else 'KOSONG ✗'}\n"
+            f"GROQ_API_KEY: {'SET ✓' if GROQ_API_KEY else 'KOSONG ✗'}\n"
+            f"needs_search test: {needs_search('harga btc skrg')}"
+        )
+        return
     try:
         send_typing(chat_id)
         reply = ask_groq(chat_id, text)
