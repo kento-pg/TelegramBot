@@ -51,32 +51,32 @@ def ask_groq(chat_id: int, user_msg: str) -> str:
 def health():
     return "OK", 200
 
-@app.post(f"/webhook/{TELEGRAM_TOKEN}")
+@app.post("/webhook")
 def webhook():
-    data  = request.get_json(silent=True) or {}
-    msg   = data.get("message", {})
-    chat_id = msg.get("chat", {}).get("id")
-    text    = msg.get("text", "")
-
-    if not chat_id or not text:
-        return "OK", 200
-
-    if text == "/start":
-        send_message(chat_id, "Halo! Saya asisten AI Anda. Tanya apa saja!")
-        return "OK", 200
-
-    if text == "/clear":
-        history.pop(chat_id, None)
-        send_message(chat_id, "Riwayat percakapan dihapus.")
-        return "OK", 200
-
     try:
+        data    = request.get_json(silent=True) or {}
+        msg     = data.get("message", {})
+        chat_id = msg.get("chat", {}).get("id")
+        text    = msg.get("text", "")
+
+        if not chat_id or not text:
+            return "OK", 200
+
+        if text.startswith("/start"):
+            send_message(chat_id, "Halo! Saya asisten AI Anda. Tanya apa saja!")
+            return "OK", 200
+
+        if text.startswith("/clear"):
+            history.pop(chat_id, None)
+            send_message(chat_id, "Riwayat percakapan dihapus.")
+            return "OK", 200
+
         send_typing(chat_id)
         reply = ask_groq(chat_id, text)
         send_message(chat_id, reply)
+
     except Exception as e:
-        logger.error(f"Error: {e}")
-        send_message(chat_id, "Maaf, terjadi error. Coba lagi.")
+        logger.error(f"Webhook error: {e}", exc_info=True)
 
     return "OK", 200
 
