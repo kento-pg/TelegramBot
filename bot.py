@@ -51,6 +51,23 @@ def ask_groq(chat_id: int, user_msg: str) -> str:
 def health():
     return "OK", 200
 
+@app.get("/diag")
+def diag():
+    results = {}
+    try:
+        r = requests.get("https://api.telegram.org", timeout=5)
+        results["telegram"] = r.status_code
+    except Exception as e:
+        results["telegram"] = str(e)
+    try:
+        r = requests.get("https://api.groq.com", timeout=5)
+        results["groq"] = r.status_code
+    except Exception as e:
+        results["groq"] = str(e)
+    results["token_set"] = bool(TELEGRAM_TOKEN)
+    results["groq_key_set"] = bool(GROQ_API_KEY)
+    return jsonify(results)
+
 @app.post("/webhook")
 def webhook():
     try:
