@@ -1,7 +1,9 @@
 import os
 import asyncio
 import logging
+import threading
 import requests
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 
@@ -70,7 +72,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Groq error: {e}")
         await update.message.reply_text("Maaf, terjadi error. Coba lagi.")
 
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+    def log_message(self, *args):
+        pass
+
+def run_health_server():
+    HTTPServer(("0.0.0.0", 7860), HealthHandler).serve_forever()
+
 def main():
+    threading.Thread(target=run_health_server, daemon=True).start()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     app = Application.builder().token(TELEGRAM_TOKEN).build()
