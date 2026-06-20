@@ -25,6 +25,19 @@ SEARCH_KEYWORDS = [
     "price", "how much", "what happened", "market",
 ]
 
+CRYPTO_MAP = {
+    "btc": "bitcoin", "bitcoin": "bitcoin",
+    "eth": "ethereum", "ethereum": "ethereum",
+    "sol": "solana", "solana": "solana",
+    "bnb": "binancecoin",
+    "xrp": "ripple",
+    "doge": "dogecoin",
+    "ada": "cardano",
+    "avax": "avalanche-2",
+    "dot": "polkadot",
+    "matic": "matic-network",
+}
+
 logger.info(f"TAVILY_API_KEY loaded: {'YES' if TAVILY_API_KEY else 'NO'}")
 
 history: dict[int, list] = {}
@@ -33,6 +46,28 @@ history: dict[int, list] = {}
 def needs_search(text: str) -> bool:
     t = text.lower()
     return any(kw in t for kw in SEARCH_KEYWORDS)
+
+
+def get_crypto_price(text: str) -> str:
+    """Fetch live crypto price from CoinGecko (no API key needed)."""
+    t = text.lower()
+    coin_id = next((CRYPTO_MAP[k] for k in CRYPTO_MAP if k in t), None)
+    if not coin_id:
+        return ""
+    try:
+        resp = requests.get(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={"ids": coin_id, "vs_currencies": "usd,idr"},
+            timeout=10,
+        )
+        data = resp.json()
+        usd = data[coin_id]["usd"]
+        idr = data[coin_id]["idr"]
+        name = coin_id.capitalize()
+        return f"💰 {name}: ${usd:,.2f} USD (Rp {idr:,.0f})"
+    except Exception as e:
+        logger.warning(f"CoinGecko failed: {e}")
+        return ""
 
 
 def web_search(query: str) -> str:
@@ -136,7 +171,12 @@ def handle_update(update):
         return
     try:
         send_typing(chat_id)
-        # For current-info queries, use Tavily answer directly
+        # Crypto price: use CoinGecko directly (always works)
+        crypto_reply = get_crypto_price(text)
+        if crypto_reply:
+            send_message(chat_id, crypto_reply)
+            return
+        # General current-info: try Tavily
         if needs_search(text):
             answer, details = web_search(text)
             if answer or details:
