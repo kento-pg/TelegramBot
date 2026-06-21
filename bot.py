@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 GROQ_API_KEY    = os.environ["GROQ_API_KEY"]
 TELEGRAM_TOKEN  = os.environ.get("TELEGRAM_TOKEN", "")
 GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
+WORKER_URL      = os.environ.get("WORKER_URL", "")  # Cloudflare Worker proxy
 GROQ_URL        = "https://api.groq.com/openai/v1/chat/completions"
 GEMINI_URL      = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
@@ -75,20 +76,13 @@ def web_search(query: str) -> str:
 def analyze_photo(file_id: str, caption: str) -> str:
     if not GEMINI_API_KEY:
         return "Analisa foto belum aktif. Tambahkan GEMINI_API_KEY di HF Spaces secrets."
-    if not TELEGRAM_TOKEN:
-        return "Analisa foto belum aktif. Tambahkan TELEGRAM_TOKEN di HF Spaces secrets."
+    if not WORKER_URL:
+        return "Analisa foto belum aktif. Tambahkan WORKER_URL (Cloudflare Worker) di HF Spaces secrets."
     try:
-        r = requests.get(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile",
-            params={"file_id": file_id}, timeout=8,
-        )
-        r.raise_for_status()
-        file_path = r.json()["result"]["file_path"]
-        img_bytes = requests.get(
-            f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path}",
-            timeout=15,
-        ).content
-        img_b64 = base64.b64encode(img_bytes).decode()
+        # Download foto via Cloudflare Worker (bypass HF Spaces block)
+        img_resp = requests.get(WORKER_URL, params={"file_id": file_id}, timeout=20)
+        img_resp.raise_for_status()
+        img_b64 = base64.b64encode(img_resp.content).decode()
         prompt = caption if caption else "Jelaskan isi gambar ini secara detail."
         resp = requests.post(
             GEMINI_URL,
@@ -165,11 +159,11 @@ def process_update(update: dict) -> dict | None:
 
     if text.startswith("/debug"):
         binance = get_crypto_price("btc") or "GAGAL"
-        gemini = "SET" if GEMINI_API_KEY else "KOSONG"
         return make_reply(chat_id,
             f"Mode: webhook\n"
             f"Groq: OK\n"
-            f"Gemini: {gemini}\n"
+            f"Gemini: {'SET' if GEMINI_API_KEY else 'KOSONG'}\n"
+            f"Worker: {'SET' if WORKER_URL else 'KOSONG'}\n"
             f"Binance: {binance}"
         )
 
