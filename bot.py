@@ -122,7 +122,7 @@ def analyze_photo(file_id: str, caption: str) -> str:
             headers={"Authorization": f"Bearer {GROQ_API_KEY}",
                      "Content-Type": "application/json"},
             json={
-                "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+                "model": "llama-3.2-11b-vision-preview",
                 "messages": [{
                     "role": "user",
                     "content": [
@@ -248,12 +248,15 @@ def handle_update(update):
         # Link → fetch & summarize
         url = extract_url(text)
         if url:
+            send_message(chat_id, f"🔗 Membaca {url} ...")
             page_text = fetch_url_text(url)
             if page_text:
                 reply = ask_groq(chat_id, text,
                     extra_context=f"Isi halaman web ({url}):\n{page_text}")
                 send_message(chat_id, reply)
-                return
+            else:
+                send_message(chat_id, "Tidak bisa membaca halaman ini (mungkin butuh login atau diblokir).")
+            return
 
         # News search
         if needs_search(text):
