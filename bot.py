@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import threading
 import logging
 import requests
@@ -35,13 +36,33 @@ BINANCE_SYMBOLS = {
 
 history: dict[int, list] = {}
 
+# Diagnostic state — readable via health endpoint
+diag: dict = {
+    "polling_started": False,
+    "updates_received": 0,
+    "updates_processed": 0,
+    "last_update_id": None,
+    "last_error": None,
+    "send_ok": 0,
+    "send_fail": 0,
+    "getme": None,
+}
+
 
 def send_message(chat_id, text):
     try:
-        requests.post(f"{TG_API}/sendMessage",
-                      json={"chat_id": chat_id, "text": text}, timeout=10)
+        r = requests.post(f"{TG_API}/sendMessage",
+                          json={"chat_id": chat_id, "text": text}, timeout=10)
+        if r.status_code == 200:
+            diag["send_ok"] += 1
+        else:
+            diag["send_fail"] += 1
+            diag["last_error"] = f"sendMessage {r.status_code}: {r.text[:100]}"
+            logger.error(diag["last_error"])
     except Exception as e:
-        logger.error(f"send_message failed: {e}")
+        diag["send_fail"] += 1
+        diag["last_error"] = f"sendMessage exc: {e}"
+        logger.error(diag["last_error"])
 
 
 def send_typing(chat_id):
@@ -118,7 +139,7 @@ def ask_groq(messages: list, system: str = SYSTEM_PROMPT) -> str:
         except Exception as e:
             logger.warning(f"Groq attempt {attempt+1} failed: {e}")
             if attempt == 2:
-                return "Maaf, terjadi error. Coba lagi."
+                return f"Error Groq: {str(e)[:100]}"
     return "Maaf, terjadi error."
 
 
@@ -158,7 +179,9 @@ def handle_update(update):
     if not chat_id:
         return
 
-    # ── Photo ─────────────────────────────────────────────────────────────────
+    diag["updates_processed"] += 1
+
+    # ── Photo ──────────────────────────────────────────────────────────────────
     photos = msg.get("photo")
     if photos:
         send_message(chat_id, "Foto diterima, sedang dianalisa...")
@@ -168,7 +191,7 @@ def handle_update(update):
         send_message(chat_id, reply)
         return
 
-    # ── Text ──────────────────────────────────────────────────────────────────
+    # ── Text ───────────────────────────────────────────────────────────────────
     text = msg.get("text", "")
     if not text:
         return
@@ -187,18 +210,25 @@ def handle_update(update):
         return
     if text.startswith("/debug"):
         binance = get_crypto_price("btc") or "GAGAL"
-        send_message(chat_id, f"Bot OK\nBinance: {binance}")
+        info = (
+            f"SHA: 631d40a\n"
+            f"updates_received: {diag['updates_received']}\n"
+            f"updates_processed: {diag['updates_processed']}\n"
+            f"send_ok: {diag['send_ok']}\n"
+            f"send_fail: {diag['send_fail']}\n"
+            f"last_error: {diag['last_error']}\n"
+            f"Binance: {binance}"
+        )
+        send_message(chat_id, info)
         return
 
     send_typing(chat_id)
 
-    # Crypto price
     crypto = get_crypto_price(text)
     if crypto:
         send_message(chat_id, crypto)
         return
 
-    # Link
     url = extract_url(text)
     if url:
         send_message(chat_id, f"Membaca {url}...")
@@ -207,14 +237,12 @@ def handle_update(update):
         send_message(chat_id, ask_groq(msgs))
         return
 
-    # News
     if any(kw in text.lower() for kw in SEARCH_KEYWORDS):
         news = web_search(text)
         if news:
             send_message(chat_id, news)
             return
 
-    # General
     msgs = history.setdefault(chat_id, [])
     msgs.append({"role": "user", "content": text})
     if len(msgs) > 10:
@@ -225,28 +253,45 @@ def handle_update(update):
 
 
 def polling_loop():
+    # Verify token works
+    try:
+        r = requests.get(f"{TG_API}/getMe", timeout=10)
+        diag["getme"] = r.json()
+    except Exception as e:
+        diag["getme"] = f"ERROR: {e}"
+        diag["last_error"] = str(e)
+
     requests.post(f"{TG_API}/deleteWebhook", timeout=15)
+    diag["polling_started"] = True
     logger.info("Bot polling started")
     offset = None
     while True:
         try:
             params = {"timeout": 30, "offset": offset} if offset else {"timeout": 30}
             resp = requests.get(f"{TG_API}/getUpdates", params=params, timeout=40)
-            for update in resp.json().get("result", []):
+            updates = resp.json().get("result", [])
+            diag["updates_received"] += len(updates)
+            for update in updates:
                 try:
                     handle_update(update)
                 except Exception as e:
-                    logger.error(f"handle_update error: {e}")
+                    diag["last_error"] = f"handle_update: {e}"
+                    logger.error(diag["last_error"])
                 offset = update["update_id"] + 1
+                diag["last_update_id"] = offset - 1
         except Exception as e:
-            logger.error(f"Polling error: {e}")
+            diag["last_error"] = f"polling: {e}"
+            logger.error(diag["last_error"])
 
 
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        body = json.dumps(diag, default=str, indent=2).encode()
         self.send_response(200)
+        self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(b"OK")
+        self.wfile.write(body)
+
     def log_message(self, *args):
         pass
 
