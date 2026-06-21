@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import base64
 import logging
 import requests
 import xml.etree.ElementTree as ET
@@ -9,8 +10,11 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-GROQ_API_KEY = os.environ["GROQ_API_KEY"]
-GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_API_KEY    = os.environ["GROQ_API_KEY"]
+TELEGRAM_TOKEN  = os.environ.get("TELEGRAM_TOKEN", "")
+GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
+GROQ_URL        = "https://api.groq.com/openai/v1/chat/completions"
+GEMINI_URL      = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
 SYSTEM_PROMPT = """Kamu adalah asisten pribadi yang cerdas dan helpful.
 Jawab dalam bahasa yang sama dengan pertanyaan pengguna (Indonesia atau Inggris).
@@ -68,6 +72,40 @@ def web_search(query: str) -> str:
         return ""
 
 
+def analyze_photo(file_id: str, caption: str) -> str:
+    if not GEMINI_API_KEY:
+        return "Analisa foto belum aktif. Tambahkan GEMINI_API_KEY di HF Spaces secrets."
+    if not TELEGRAM_TOKEN:
+        return "Analisa foto belum aktif. Tambahkan TELEGRAM_TOKEN di HF Spaces secrets."
+    try:
+        r = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile",
+            params={"file_id": file_id}, timeout=8,
+        )
+        r.raise_for_status()
+        file_path = r.json()["result"]["file_path"]
+        img_bytes = requests.get(
+            f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path}",
+            timeout=15,
+        ).content
+        img_b64 = base64.b64encode(img_bytes).decode()
+        prompt = caption if caption else "Jelaskan isi gambar ini secara detail."
+        resp = requests.post(
+            GEMINI_URL,
+            params={"key": GEMINI_API_KEY},
+            json={"contents": [{"parts": [
+                {"text": prompt},
+                {"inlineData": {"mimeType": "image/jpeg", "data": img_b64}},
+            ]}]},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception as e:
+        logger.error(f"Photo analysis failed: {e}")
+        return f"Gagal analisa foto: {str(e)[:150]}"
+
+
 def ask_groq(messages: list) -> str:
     for attempt in range(3):
         try:
@@ -98,6 +136,13 @@ def process_update(update: dict) -> dict | None:
     chat_id = msg.get("chat", {}).get("id")
     if not chat_id:
         return None
+
+    # Photo
+    photos = msg.get("photo")
+    if photos:
+        caption = msg.get("caption", "")
+        result = analyze_photo(photos[-1]["file_id"], caption)
+        return make_reply(chat_id, result)
 
     text = msg.get("text", "")
     if not text:
