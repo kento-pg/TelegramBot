@@ -101,9 +101,12 @@ def analyze_photo(file_id: str, caption: str) -> str:
         )
         resp.raise_for_status()
         return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except requests.exceptions.Timeout:
+        logger.error("Photo analysis failed: Telegram API timeout")
+        return "Foto tidak bisa dianalisa saat ini (server tidak bisa mengakses file Telegram). Coba ketik pertanyaannya sebagai teks."
     except Exception as e:
         logger.error(f"Photo analysis failed: {e}")
-        return f"Gagal analisa foto: {str(e)[:150]}"
+        return f"Gagal analisa foto: {str(e)[:100]}"
 
 
 def ask_groq(messages: list) -> str:
@@ -159,6 +162,16 @@ def process_update(update: dict) -> dict | None:
     if text.startswith("/clear"):
         history.pop(chat_id, None)
         return make_reply(chat_id, "Riwayat percakapan dihapus.")
+
+    if text.startswith("/debug"):
+        binance = get_crypto_price("btc") or "GAGAL"
+        gemini = "SET" if GEMINI_API_KEY else "KOSONG"
+        return make_reply(chat_id,
+            f"Mode: webhook\n"
+            f"Groq: OK\n"
+            f"Gemini: {gemini}\n"
+            f"Binance: {binance}"
+        )
 
     # Crypto price
     crypto = get_crypto_price(text)
