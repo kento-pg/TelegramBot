@@ -198,16 +198,17 @@ def ask_groq(chat_id, user_msg, extra_context: str = ""):
 # ── Update handler ────────────────────────────────────────────────────────────
 
 def handle_update(update):
-    msg     = update.get("message", {})
+    # Find chat_id from any update type
+    msg = (update.get("message") or update.get("edited_message") or
+           update.get("channel_post") or {})
     chat_id = msg.get("chat", {}).get("id")
     if not chat_id:
         return
 
-    # Debug: show message fields for non-text messages
+    # Debug: show all message fields for non-text messages
     if not msg.get("text"):
-        fields = {k: type(v).__name__ for k, v in msg.items()
-                  if k not in ("from", "chat", "date", "message_id")}
-        send_message(chat_id, f"🔍 Debug fields: {fields}")
+        keys = list(msg.keys())
+        send_message(chat_id, f"🔍 msg keys: {keys}")
 
     # Photo
     photos = msg.get("photo")
