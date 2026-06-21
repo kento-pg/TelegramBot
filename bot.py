@@ -1,10 +1,12 @@
 import os
 import re
+import io
 import base64
 import threading
 import logging
 import requests
 import xml.etree.ElementTree as ET
+from PIL import Image
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 logging.basicConfig(level=logging.INFO)
@@ -115,7 +117,13 @@ def analyze_photo(file_id: str, caption: str) -> str:
         img_bytes = requests.get(
             f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path}", timeout=15
         ).content
-        img_b64 = base64.b64encode(img_bytes).decode()
+        # Resize to max 1024px to stay within Groq vision limits
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        img.thumbnail((1024, 1024))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        img_b64 = base64.b64encode(buf.getvalue()).decode()
+        logger.info(f"Image resized to {img.size}, b64 size={len(img_b64)}")
         prompt = caption if caption else "Jelaskan isi gambar ini secara detail."
         resp = requests.post(
             GROQ_URL,
