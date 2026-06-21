@@ -199,10 +199,15 @@ def handle_update(update):
     photos = msg.get("photo")
     if photos:
         send_typing(chat_id)
-        file_id = photos[-1]["file_id"]
-        caption = msg.get("caption", "")
-        reply = analyze_photo(file_id, caption)
-        send_message(chat_id, reply)
+        try:
+            file_id = photos[-1]["file_id"]
+            caption = msg.get("caption", "")
+            logger.info(f"Analyzing photo file_id={file_id[:20]}")
+            reply = analyze_photo(file_id, caption)
+            send_message(chat_id, reply)
+        except Exception as e:
+            logger.error(f"Photo handler error: {e}")
+            send_message(chat_id, f"Maaf, gagal memproses foto: {str(e)[:100]}")
         return
 
     text = msg.get("text", "")
