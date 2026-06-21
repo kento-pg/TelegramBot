@@ -1,4 +1,6 @@
 import os
+import re
+import base64
 import threading
 import logging
 import requests
@@ -10,9 +12,7 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 GROQ_API_KEY   = os.environ["GROQ_API_KEY"]
-TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "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")
 GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
-TAVILY_URL     = "https://api.tavily.com/search"
 TG_API         = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
 SYSTEM_PROMPT = """Kamu adalah asisten pribadi yang cerdas dan helpful.
@@ -30,21 +30,16 @@ BINANCE_SYMBOLS = {
     "btc": "BTCUSDT", "bitcoin": "BTCUSDT",
     "eth": "ETHUSDT", "ethereum": "ETHUSDT",
     "sol": "SOLUSDT", "solana": "SOLUSDT",
-    "bnb": "BNBUSDT",
-    "xrp": "XRPUSDT",
-    "doge": "DOGEUSDT",
-    "ada": "ADAUSDT",
-    "avax": "AVAXUSDT",
-    "dot": "DOTUSDT",
-    "matic": "MATICUSDT",
-    "link": "LINKUSDT",
-    "uni": "UNIUSDT",
+    "bnb": "BNBUSDT", "xrp": "XRPUSDT",
+    "doge": "DOGEUSDT", "ada": "ADAUSDT",
+    "avax": "AVAXUSDT", "dot": "DOTUSDT",
+    "matic": "MATICUSDT", "link": "LINKUSDT",
 }
-
-logger.info(f"TAVILY_API_KEY loaded: {'YES' if TAVILY_API_KEY else 'NO'}")
 
 history: dict[int, list] = {}
 
+
+# ── Crypto price ──────────────────────────────────────────────────────────────
 
 def needs_search(text: str) -> bool:
     t = text.lower()
@@ -52,19 +47,14 @@ def needs_search(text: str) -> bool:
 
 
 def get_crypto_price(text: str) -> str:
-    """Fetch live crypto price from Binance (no API key, no rate limit)."""
     t = text.lower()
     symbol = next((BINANCE_SYMBOLS[k] for k in BINANCE_SYMBOLS if k in t), None)
     if not symbol:
         return ""
     try:
-        resp = requests.get(
-            "https://api.binance.com/api/v3/ticker/price",
-            params={"symbol": symbol},
-            timeout=8,
-        )
-        data = resp.json()
-        price = float(data["price"])
+        resp = requests.get("https://api.binance.com/api/v3/ticker/price",
+                            params={"symbol": symbol}, timeout=8)
+        price = float(resp.json()["price"])
         coin = symbol.replace("USDT", "")
         return f"💰 {coin}: ${price:,.2f} USDT (Binance, realtime)"
     except Exception as e:
@@ -72,20 +62,21 @@ def get_crypto_price(text: str) -> str:
         return ""
 
 
+# ── News search ───────────────────────────────────────────────────────────────
+
 def web_search(query: str) -> tuple[str, str]:
-    """Fetch latest news from Google News RSS (no API key needed)."""
     try:
-        url = "https://news.google.com/rss/search"
-        resp = requests.get(url, params={"q": query, "hl": "id", "gl": "ID", "ceid": "ID:id"},
-                            timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        resp = requests.get(
+            "https://news.google.com/rss/search",
+            params={"q": query, "hl": "id", "gl": "ID", "ceid": "ID:id"},
+            timeout=8, headers={"User-Agent": "Mozilla/5.0"},
+        )
         root = ET.fromstring(resp.content)
-        items = root.findall(".//item")[:5]
         headlines = []
-        for item in items:
+        for item in root.findall(".//item")[:5]:
             title = item.findtext("title", "").split(" - ")[0].strip()
-            desc = item.findtext("description", "")[:150].strip()
             if title:
-                headlines.append(f"• {title}: {desc}" if desc else f"• {title}")
+                headlines.append(f"• {title}")
         if not headlines:
             return "", ""
         return f"Berita terbaru tentang '{query}':", "\n".join(headlines)
@@ -93,6 +84,65 @@ def web_search(query: str) -> tuple[str, str]:
         logger.warning(f"News search failed: {e}")
         return "", ""
 
+
+# ── Link reader ───────────────────────────────────────────────────────────────
+
+def extract_url(text: str) -> str:
+    match = re.search(r'https?://\S+', text)
+    return match.group(0) if match else ""
+
+
+def fetch_url_text(url: str) -> str:
+    try:
+        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        # Strip HTML tags
+        text = re.sub(r'<[^>]+>', ' ', resp.text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text[:3000]
+    except Exception as e:
+        logger.warning(f"URL fetch failed: {e}")
+        return ""
+
+
+# ── Photo handler ─────────────────────────────────────────────────────────────
+
+def analyze_photo(file_id: str, caption: str) -> str:
+    try:
+        # Get file path from Telegram
+        r = requests.get(f"{TG_API}/getFile", params={"file_id": file_id}, timeout=10)
+        file_path = r.json()["result"]["file_path"]
+        # Download photo
+        img_bytes = requests.get(
+            f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path}", timeout=15
+        ).content
+        img_b64 = base64.b64encode(img_bytes).decode()
+        prompt = caption if caption else "Jelaskan isi gambar ini secara detail."
+        resp = requests.post(
+            GROQ_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}",
+                     "Content-Type": "application/json"},
+            json={
+                "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url",
+                         "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                    ],
+                }],
+                "max_tokens": 1024,
+            },
+            timeout=45,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        logger.error(f"Photo analysis failed: {e}")
+        return "Maaf, tidak bisa menganalisa foto ini."
+
+
+# ── Telegram helpers ──────────────────────────────────────────────────────────
 
 def send_message(chat_id, text):
     requests.post(f"{TG_API}/sendMessage",
@@ -107,15 +157,14 @@ def send_typing(chat_id):
         pass
 
 
-def ask_groq(chat_id, user_msg):
-    msgs = history.setdefault(chat_id, [])
+# ── Groq text ─────────────────────────────────────────────────────────────────
 
-    msgs.append({"role": "user", "content": user_msg})
+def ask_groq(chat_id, user_msg, extra_context: str = ""):
+    msgs = history.setdefault(chat_id, [])
+    content = f"{extra_context}\n\nPertanyaan: {user_msg}" if extra_context else user_msg
+    msgs.append({"role": "user", "content": content})
     if len(msgs) > 10:
         msgs[:] = msgs[-10:]
-
-    system = SYSTEM_PROMPT
-
     for attempt in range(3):
         try:
             resp = requests.post(
@@ -123,7 +172,7 @@ def ask_groq(chat_id, user_msg):
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}",
                          "Content-Type": "application/json"},
                 json={"model": "llama-3.1-8b-instant",
-                      "messages": [{"role": "system", "content": system}] + msgs,
+                      "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + msgs,
                       "max_tokens": 1024, "temperature": 0.7},
                 timeout=45,
             )
@@ -135,46 +184,78 @@ def ask_groq(chat_id, user_msg):
             logger.warning(f"Groq attempt {attempt+1} failed: {e}")
             if attempt == 2:
                 raise
-    raise RuntimeError("Groq failed after 3 attempts")
+    raise RuntimeError("Groq failed")
 
+
+# ── Update handler ────────────────────────────────────────────────────────────
 
 def handle_update(update):
     msg     = update.get("message", {})
     chat_id = msg.get("chat", {}).get("id")
-    text    = msg.get("text", "")
-    if not chat_id or not text:
+    if not chat_id:
         return
+
+    # Photo
+    photos = msg.get("photo")
+    if photos:
+        send_typing(chat_id)
+        file_id = photos[-1]["file_id"]
+        caption = msg.get("caption", "")
+        reply = analyze_photo(file_id, caption)
+        send_message(chat_id, reply)
+        return
+
+    text = msg.get("text", "")
+    if not text:
+        return
+
+    # Commands
     if text.startswith("/start"):
-        send_message(chat_id, "Halo! Saya asisten AI Anda. Tanya apa saja — termasuk berita dan harga terkini!")
+        send_message(chat_id,
+            "Halo! Saya asisten AI Anda.\n"
+            "• Tanya apa saja\n"
+            "• Kirim foto untuk dianalisa\n"
+            "• Kirim link untuk dirangkum\n"
+            "• /clear — hapus riwayat")
         return
     if text.startswith("/clear"):
         history.pop(chat_id, None)
         send_message(chat_id, "Riwayat percakapan dihapus.")
         return
     if text.startswith("/debug"):
-        # Test 1: Binance crypto price
-        binance_test = get_crypto_price("btc") or "GAGAL ✗"
-        # Test 2: Google News RSS
-        news_test = "GAGAL ✗"
+        binance = get_crypto_price("btc") or "GAGAL ✗"
+        news_ok = "GAGAL ✗"
         try:
-            answer, details = web_search("bitcoin")
-            news_test = f"OK ✓ — {details[:80]}" if (answer or details) else "KOSONG"
+            a, d = web_search("bitcoin")
+            news_ok = "OK ✓" if (a or d) else "KOSONG"
         except Exception as e:
-            news_test = f"ERROR: {str(e)[:60]}"
+            news_ok = f"ERROR: {str(e)[:40]}"
         send_message(chat_id,
             f"GROQ: {'SET ✓' if GROQ_API_KEY else 'KOSONG ✗'}\n"
-            f"Binance price: {binance_test}\n"
-            f"Google News: {news_test}"
-        )
+            f"Binance: {binance}\n"
+            f"Google News: {news_ok}")
         return
+
     try:
         send_typing(chat_id)
-        # Crypto price: use CoinGecko directly (always works)
-        crypto_reply = get_crypto_price(text)
-        if crypto_reply:
-            send_message(chat_id, crypto_reply)
+
+        # Crypto price
+        crypto = get_crypto_price(text)
+        if crypto:
+            send_message(chat_id, crypto)
             return
-        # General current-info: try Tavily
+
+        # Link → fetch & summarize
+        url = extract_url(text)
+        if url:
+            page_text = fetch_url_text(url)
+            if page_text:
+                reply = ask_groq(chat_id, text,
+                    extra_context=f"Isi halaman web ({url}):\n{page_text}")
+                send_message(chat_id, reply)
+                return
+
+        # News search
         if needs_search(text):
             answer, details = web_search(text)
             if answer or details:
@@ -183,15 +264,19 @@ def handle_update(update):
                     reply += ("\n\n" if reply else "") + details
                 send_message(chat_id, reply.strip())
                 return
+
+        # General Groq
         reply = ask_groq(chat_id, text)
         send_message(chat_id, reply)
+
     except Exception as e:
         logger.error(f"Error: {e}")
         send_message(chat_id, "Maaf, terjadi error. Coba lagi.")
 
 
+# ── Polling ───────────────────────────────────────────────────────────────────
+
 def polling_loop():
-    logger.info("Deleting webhook...")
     requests.post(f"{TG_API}/deleteWebhook", timeout=15)
     logger.info("Bot polling started")
     offset = None
@@ -199,8 +284,7 @@ def polling_loop():
         try:
             params = {"timeout": 30, "offset": offset} if offset else {"timeout": 30}
             resp = requests.get(f"{TG_API}/getUpdates", params=params, timeout=40)
-            updates = resp.json().get("result", [])
-            for update in updates:
+            for update in resp.json().get("result", []):
                 handle_update(update)
                 offset = update["update_id"] + 1
         except Exception as e:
