@@ -203,6 +203,12 @@ def handle_update(update):
     if not chat_id:
         return
 
+    # Debug: show message fields for non-text messages
+    if not msg.get("text"):
+        fields = {k: type(v).__name__ for k, v in msg.items()
+                  if k not in ("from", "chat", "date", "message_id")}
+        send_message(chat_id, f"🔍 Debug fields: {fields}")
+
     # Photo
     photos = msg.get("photo")
     if photos:
