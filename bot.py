@@ -255,13 +255,17 @@ def handle_update(update):
 def polling_loop():
     # Verify token works
     try:
-        r = requests.get(f"{TG_API}/getMe", timeout=10)
+        r = requests.get(f"{TG_API}/getMe", timeout=30)
         diag["getme"] = r.json()
     except Exception as e:
         diag["getme"] = f"ERROR: {e}"
         diag["last_error"] = str(e)
 
-    requests.post(f"{TG_API}/deleteWebhook", timeout=15)
+    try:
+        requests.post(f"{TG_API}/deleteWebhook", timeout=30)
+    except Exception as e:
+        logger.warning(f"deleteWebhook failed: {e}")
+
     diag["polling_started"] = True
     logger.info("Bot polling started")
     offset = None
