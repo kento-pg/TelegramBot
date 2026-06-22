@@ -102,6 +102,24 @@ def web_search(query: str) -> str:
         return ""
 
 
+URL_PATTERN = re.compile(r'https?://[^\s]+')
+
+def fetch_url(url: str) -> str:
+    try:
+        resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        # Strip HTML tags
+        text = re.sub(r'<style[^>]*>.*?</style>', ' ', resp.text, flags=re.DOTALL)
+        text = re.sub(r'<script[^>]*>.*?</script>', ' ', text, flags=re.DOTALL)
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = re.sub(r'[ \t]+', ' ', text)
+        text = re.sub(r'\n{3,}', '\n\n', text).strip()
+        return text[:6000]
+    except Exception as e:
+        logger.warning(f"URL fetch failed: {e}")
+        return ""
+
+
 def analyze_photo(file_id: str, caption: str) -> str:
     if not GEMINI_API_KEY:
         return "Analisa foto belum aktif. Tambahkan GEMINI_API_KEY di HF Spaces secrets."
@@ -178,6 +196,8 @@ def process_update(update: dict) -> dict | None:
         return make_reply(chat_id,
             "Halo! Saya Kina, asisten AI Anda.\n"
             "- Tanya apa saja\n"
+            "- Kirim link artikel → saya ringkaskan\n"
+            "- Kirim foto → saya analisa\n"
             "- Tanya harga crypto (BTC, ETH, SOL...)\n"
             "- Tanya berita terbaru\n"
             "- /clear hapus riwayat")
@@ -195,6 +215,22 @@ def process_update(update: dict) -> dict | None:
             f"Worker: {'SET' if WORKER_URL else 'KOSONG'}\n"
             f"Binance: {binance}"
         )
+
+    # URL reading
+    urls = URL_PATTERN.findall(text)
+    if urls:
+        page = fetch_url(urls[0])
+        if page:
+            question = URL_PATTERN.sub("", text).strip()
+            prompt = f"Konten halaman web:\n{page}\n\n{'Pertanyaan: ' + question if question else 'Ringkas isi halaman ini.'}"
+            msgs = history.setdefault(chat_id, [])
+            msgs.append({"role": "user", "content": prompt})
+            if len(msgs) > 10:
+                msgs[:] = msgs[-10:]
+            reply = ask_groq(msgs)
+            msgs.append({"role": "assistant", "content": reply})
+            return make_reply(chat_id, reply)
+        return make_reply(chat_id, "Gagal mengakses link tersebut.")
 
     # Crypto price
     crypto = get_crypto_price(text)
