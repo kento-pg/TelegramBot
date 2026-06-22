@@ -15,7 +15,7 @@ TELEGRAM_TOKEN  = os.environ.get("TELEGRAM_TOKEN", "")
 GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
 WORKER_URL      = os.environ.get("WORKER_URL", "")  # Cloudflare Worker proxy
 GROQ_URL        = "https://api.groq.com/openai/v1/chat/completions"
-GEMINI_URL      = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+GEMINI_URL      = "https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent"
 
 SYSTEM_PROMPT = """Kamu adalah asisten pribadi yang cerdas dan helpful.
 Jawab dalam bahasa yang sama dengan pertanyaan pengguna (Indonesia atau Inggris).
@@ -39,18 +39,47 @@ BINANCE_SYMBOLS = {
 history: dict[int, list] = {}
 
 
+COINGECKO_IDS = {
+    "btc": "bitcoin", "bitcoin": "bitcoin",
+    "eth": "ethereum", "ethereum": "ethereum",
+    "sol": "solana", "solana": "solana",
+    "bnb": "binancecoin", "xrp": "ripple",
+    "doge": "dogecoin", "ada": "cardano",
+    "avax": "avalanche-2", "dot": "polkadot",
+}
+
 def get_crypto_price(text: str) -> str:
     t = text.lower()
     symbol = next((BINANCE_SYMBOLS[k] for k in BINANCE_SYMBOLS if k in t), None)
     if not symbol:
         return ""
+    coin_name = symbol.replace("USDT", "")
+    # Try Binance first
     try:
         resp = requests.get("https://api.binance.com/api/v3/ticker/price",
                             params={"symbol": symbol}, timeout=8)
+        resp.raise_for_status()
         price = float(resp.json()["price"])
-        return f"{symbol.replace('USDT','')}: ${price:,.2f} USDT (Binance realtime)"
+        return f"{coin_name}: ${price:,.2f} USDT (Binance)"
     except Exception as e:
-        logger.warning(f"Binance failed: {e}")
+        logger.warning(f"Binance failed, trying CoinGecko: {e}")
+    # Fallback to CoinGecko
+    try:
+        cg_id = COINGECKO_IDS.get(t.split()[0], "")
+        if not cg_id:
+            cg_id = next((COINGECKO_IDS[k] for k in COINGECKO_IDS if k in t), "")
+        if not cg_id:
+            return ""
+        resp = requests.get(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={"ids": cg_id, "vs_currencies": "usd"},
+            timeout=8, headers={"User-Agent": "Mozilla/5.0"},
+        )
+        resp.raise_for_status()
+        price = resp.json()[cg_id]["usd"]
+        return f"{coin_name}: ${price:,.2f} USD (CoinGecko)"
+    except Exception as e:
+        logger.warning(f"CoinGecko also failed: {e}")
         return ""
 
 
