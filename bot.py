@@ -237,8 +237,9 @@ def process_update(update: dict) -> dict | None:
     if crypto:
         return make_reply(chat_id, crypto)
 
-    # News search
-    if any(kw in text.lower() for kw in SEARCH_KEYWORDS):
+    # News search — whole-word match only to avoid false positives (e.g. "now" inside "know")
+    t_lower = text.lower()
+    if any(re.search(r'\b' + re.escape(kw) + r'\b', t_lower) for kw in SEARCH_KEYWORDS):
         news = web_search(text)
         if news:
             return make_reply(chat_id, news)
