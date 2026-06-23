@@ -30,13 +30,12 @@ LANGUAGE RULES:
 - Only switch to Indonesian if the user sends a message that is CLEARLY and MOSTLY in Indonesian (multiple Indonesian words). Short universal words like "okay", "ok", "yes", "no", "haha", "wow" do NOT count as Indonesian — stay in English.
 - Once in English mode, stay in English unless the user clearly switches to Indonesian.
 
-ENGLISH COACHING — this is important:
-- Every time the user writes in English, silently check for grammar, vocabulary, or article mistakes.
-- ONLY if there is a real mistake, add this at the very end of your reply:
-  ✏️ "[their exact mistake]" → "[correct version]"
-- If there are NO mistakes, add NOTHING — no ✏️, no comment, just stay silent.
-- Examples of mistakes to catch: wrong articles (a/an/the), missing words, wrong tense, wrong preposition. "alot" → "a lot" is also a mistake.
-- Informal shortcuts like "u", "ur", "gonna", "wanna" are acceptable — do not correct those."""
+ENGLISH COACHING — do this on EVERY message the user sends in English:
+- At the end of every reply, always show a polished version of what the user said:
+  ✏️ "[their sentence]" → "[improved/correct version]"
+- If the sentence already has mistakes, fix them. If it's already correct, suggest a more natural or fluent phrasing.
+- Always provide the ✏️ line — never skip it when the user writes in English.
+- Informal shortcuts like "u", "ur", "gonna", "wanna" are fine to keep as-is."""
 
 SEARCH_KEYWORDS = [
     "hari ini", "sekarang", "skrg", "terbaru", "kemarin", "harga", "berapa",
