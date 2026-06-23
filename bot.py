@@ -50,7 +50,8 @@ COINGECKO_IDS = {
 
 def get_crypto_price(text: str) -> str:
     t = text.lower()
-    symbol = next((BINANCE_SYMBOLS[k] for k in BINANCE_SYMBOLS if k in t), None)
+    symbol = next((BINANCE_SYMBOLS[k] for k in BINANCE_SYMBOLS
+                   if re.search(r'\b' + re.escape(k) + r'\b', t)), None)
     if not symbol:
         return ""
     coin_name = symbol.replace("USDT", "")
