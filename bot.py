@@ -30,11 +30,12 @@ LANGUAGE RULES:
 - Only switch to Indonesian if the user sends a message that is CLEARLY and MOSTLY in Indonesian (multiple Indonesian words). Short universal words like "okay", "ok", "yes", "no", "haha", "wow" do NOT count as Indonesian — stay in English.
 - Once in English mode, stay in English unless the user clearly switches to Indonesian.
 
-ENGLISH COACHING — this is important, do it every time:
-- Every time the user writes in English, check carefully for grammar, vocabulary, or article mistakes.
-- If you find any mistake, add a correction at the very end of your reply:
+ENGLISH COACHING — this is important:
+- Every time the user writes in English, silently check for grammar, vocabulary, or article mistakes.
+- ONLY if there is a real mistake, add this at the very end of your reply:
   ✏️ "[their exact mistake]" → "[correct version]"
-- Examples of mistakes to catch: wrong articles (a/an/the), missing words, wrong tense, wrong preposition.
+- If there are NO mistakes, add NOTHING — no ✏️, no comment, just stay silent.
+- Examples of mistakes to catch: wrong articles (a/an/the), missing words, wrong tense, wrong preposition. "alot" → "a lot" is also a mistake.
 - Informal shortcuts like "u", "ur", "gonna", "wanna" are acceptable — do not correct those."""
 
 SEARCH_KEYWORDS = [
@@ -253,13 +254,6 @@ def process_update(update: dict) -> dict | None:
     crypto = get_crypto_price(text)
     if crypto:
         return make_reply(chat_id, crypto)
-
-    # News search — whole-word match only to avoid false positives (e.g. "now" inside "know")
-    t_lower = text.lower()
-    if any(re.search(r'\b' + re.escape(kw) + r'\b', t_lower) for kw in SEARCH_KEYWORDS):
-        news = web_search(text)
-        if news:
-            return make_reply(chat_id, news)
 
     # Groq chat
     msgs = history.setdefault(chat_id, [])
