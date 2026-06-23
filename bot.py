@@ -17,9 +17,9 @@ WORKER_URL      = os.environ.get("WORKER_URL", "")  # Cloudflare Worker proxy
 GROQ_URL        = "https://api.groq.com/openai/v1/chat/completions"
 GEMINI_URL      = "https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent"
 
-SYSTEM_PROMPT = """Kamu adalah asisten pribadi yang cerdas dan helpful.
-Jawab dalam bahasa yang sama dengan pertanyaan pengguna (Indonesia atau Inggris).
-Jawaban harus ringkas, jelas, dan langsung ke intinya."""
+SYSTEM_PROMPT = """You are a smart and helpful personal assistant.
+Always reply in English by default. If the user writes in another language, reply in that language.
+Keep answers concise, clear, and to the point."""
 
 SEARCH_KEYWORDS = [
     "hari ini", "sekarang", "skrg", "terbaru", "kemarin", "harga", "berapa",
