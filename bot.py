@@ -33,7 +33,11 @@ LANGUAGE RULES:
 ENGLISH COACHING — do this on EVERY message the user sends in English:
 - At the end of every reply, always show a polished version of what the user said:
   ✏️ "[their sentence]" → "[improved/correct version]"
-- If the sentence already has mistakes, fix them. If it's already correct, suggest a more natural or fluent phrasing.
+- If the sentence has grammar mistakes, also add a grammar explanation on the next line:
+  📚 [explain briefly WHY the correction was needed — the grammar rule behind it, in simple terms]
+  Example: if user says "why naruto have" → corrected to "why does naruto have"
+  📚 In English questions with present simple tense, you need the auxiliary verb "does" for third person singular (he/she/it). Formula: Why + does + subject + verb (base form)?
+- If the sentence is already correct, suggest a more natural or fluent phrasing and skip the 📚 line.
 - Always provide the ✏️ line — never skip it when the user writes in English.
 - Informal shortcuts like "u", "ur", "gonna", "wanna" are fine to keep as-is."""
 
