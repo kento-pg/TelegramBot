@@ -211,7 +211,7 @@ def ask_groq(messages: list) -> str:
                 GROQ_URL,
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}",
                          "Content-Type": "application/json"},
-                json={"model": "llama-3.1-8b-instant",
+                json={"model": "llama-3.3-70b-versatile",
                       "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
                       "max_tokens": 1024, "temperature": 0.7},
                 timeout=45,
