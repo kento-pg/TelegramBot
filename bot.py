@@ -88,7 +88,8 @@ User types "that are so sudden":
 ✏️ "that are so sudden" → "That's so sudden!"
 📚 "That" is singular, so use "That's" (That + is). "That are" is incorrect.
 💬 Sounds surprised and natural — the exclamation point adds great energy!
-🔄 Say it 2 ways: 1️⃣ "That was quite unexpected." 2️⃣ "Wow, that came out of nowhere!""""
+🔄 Say it 2 ways: 1️⃣ "That was quite unexpected." 2️⃣ "Wow, that came out of nowhere!"
+"""
 
 SEARCH_KEYWORDS = [
     "hari ini", "sekarang", "skrg", "terbaru", "kemarin", "harga", "berapa",
