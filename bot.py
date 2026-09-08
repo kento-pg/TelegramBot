@@ -2,7 +2,9 @@ import os
 import re
 import json
 import base64
+import difflib
 import logging
+import random
 import requests
 import xml.etree.ElementTree as ET
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -291,6 +293,10 @@ def process_update(update: dict) -> dict | None:
     if not text:
         return None
 
+    lesson_reply = maybe_handle_lesson(chat_id, text)
+    if lesson_reply is not None:
+        return make_reply(chat_id, lesson_reply)
+
     if text.startswith("/start"):
         return make_reply(chat_id,
             "Halo! Saya Kina, asisten AI Anda.\n"
@@ -299,6 +305,7 @@ def process_update(update: dict) -> dict | None:
             "- Kirim foto → saya analisa\n"
             "- Tanya harga crypto (BTC, ETH, SOL...)\n"
             "- Tanya berita terbaru\n"
+            "- Ketik \"ayo belajar inggris\" untuk mode les Bahasa Inggris\n"
             "- /clear hapus riwayat")
 
     if text.startswith("/clear"):
@@ -344,6 +351,352 @@ def process_update(update: dict) -> dict | None:
     reply = ask_groq(msgs)
     msgs.append({"role": "assistant", "content": reply})
     return make_reply(chat_id, reply)
+
+
+# ── English lesson mode ("ayo belajar inggris") ─────────────────────────────
+#
+# A structured practice session, separate from Kina's normal persona chat
+# (which already gives light coaching on every English message). Triggered
+# by an exact phrase, driven by a numbered menu, exited with "selesai".
+# State lives in memory only (same trade-off as `history` above — resets on
+# redeploy/restart, acceptable for a personal single-user bot).
+
+LESSON_TRIGGER    = "ayo belajar inggris"
+LESSON_EXIT_WORDS = {"selesai", "stop", "keluar", "exit"}
+LESSON_MENU_WORDS = {"menu"}
+
+lesson_state: dict[int, dict] = {}
+
+GRAMMAR_EXERCISES = [
+    {"broken": "She have been working here since three years.",
+     "correct": "She has been working here for three years.",
+     "explanation": "Subject 'she' needs 'has' (not 'have'); use 'for' with a duration, 'since' with a starting point."},
+    {"broken": "I am agree with your opinion about the market.",
+     "correct": "I agree with your opinion about the market.",
+     "explanation": "'Agree' is a verb, not an adjective — no 'am' needed before it."},
+    {"broken": "If I will have time, I will call you tomorrow.",
+     "correct": "If I have time, I will call you tomorrow.",
+     "explanation": "First conditional: present simple in the 'if' clause, 'will' only in the result clause."},
+    {"broken": "The company is planning to expand it's operations next year.",
+     "correct": "The company is planning to expand its operations next year.",
+     "explanation": "'Its' (possessive) has no apostrophe; 'it's' means 'it is'."},
+    {"broken": "He suggested me to invest in that stock.",
+     "correct": "He suggested that I invest in that stock.",
+     "explanation": "'Suggest' isn't followed by object + infinitive; use 'suggest that + subject + base verb' or 'suggest -ing'."},
+    {"broken": "There is many reasons why the price dropped.",
+     "correct": "There are many reasons why the price dropped.",
+     "explanation": "'Reasons' is plural, so the verb must be 'are', not 'is'."},
+    {"broken": "I look forward to hear from you soon.",
+     "correct": "I look forward to hearing from you soon.",
+     "explanation": "'Look forward to' is followed by a gerund ('-ing'), not a base infinitive."},
+    {"broken": "Yesterday, I go to the office early.",
+     "correct": "Yesterday, I went to the office early.",
+     "explanation": "'Yesterday' signals past simple, so 'go' must become 'went'."},
+    {"broken": "This is the most important decision I ever made.",
+     "correct": "This is the most important decision I have ever made.",
+     "explanation": "'Ever' with a past experience up to now needs the present perfect: 'have ever made'."},
+    {"broken": "Can you explain me how this works?",
+     "correct": "Can you explain to me how this works?",
+     "explanation": "'Explain' needs 'to' before the person: 'explain to someone', not 'explain someone'."},
+    {"broken": "The report was wrote by the analyst team.",
+     "correct": "The report was written by the analyst team.",
+     "explanation": "Passive voice needs the past participle 'written', not the past simple 'wrote'."},
+    {"broken": "I'm used to work late on weekdays.",
+     "correct": "I'm used to working late on weekdays.",
+     "explanation": "'Be used to' (a habit) is followed by a gerund: 'used to working', not 'used to work'."},
+]
+
+VOCAB_EXERCISES = [
+    {"question": "What does 'inevitable' mean?",
+     "options": {"A": "Avoidable", "B": "Certain to happen", "C": "Unlikely", "D": "Rare"},
+     "answer": "B", "example": "A market correction after such rapid growth felt inevitable."},
+    {"question": "What does 'to postpone' mean?",
+     "options": {"A": "To delay to a later time", "B": "To cancel completely", "C": "To speed up", "D": "To announce"},
+     "answer": "A", "example": "The meeting was postponed until next Monday."},
+    {"question": "What does 'thorough' mean?",
+     "options": {"A": "Careless", "B": "Fast", "C": "Complete and detailed", "D": "Confusing"},
+     "answer": "C", "example": "She did a thorough review of the contract before signing."},
+    {"question": "What does 'reluctant' mean?",
+     "options": {"A": "Eager", "B": "Unwilling", "C": "Confident", "D": "Confused"},
+     "answer": "B", "example": "He was reluctant to sell his shares at a loss."},
+    {"question": "What does 'to overwhelm' mean?",
+     "options": {"A": "To ignore", "B": "To make someone feel completely overloaded", "C": "To simplify", "D": "To reward"},
+     "answer": "B", "example": "The amount of paperwork overwhelmed the new employee."},
+    {"question": "What does 'consistent' mean?",
+     "options": {"A": "Changing often", "B": "Staying the same over time", "C": "Very expensive", "D": "Uncertain"},
+     "answer": "B", "example": "Her performance has been consistent throughout the year."},
+    {"question": "What does 'to tackle a problem' mean?",
+     "options": {"A": "To ignore a problem", "B": "To deal with a problem directly", "C": "To create a problem", "D": "To postpone a problem"},
+     "answer": "B", "example": "The team met early to tackle the budget issue."},
+    {"question": "What does 'ambiguous' mean?",
+     "options": {"A": "Very clear", "B": "Open to more than one interpretation", "C": "Extremely detailed", "D": "Offensive"},
+     "answer": "B", "example": "The instructions were ambiguous, so the team asked for clarification."},
+    {"question": "What does 'to compensate' mean?",
+     "options": {"A": "To make up for something", "B": "To ignore something", "C": "To complicate something", "D": "To delay something"},
+     "answer": "A", "example": "The company compensated customers for the delayed shipment."},
+    {"question": "What does 'feasible' mean?",
+     "options": {"A": "Impossible", "B": "Expensive", "C": "Able to be done successfully", "D": "Illegal"},
+     "answer": "C", "example": "Is it feasible to finish the project by Friday?"},
+    {"question": "What does 'to withdraw' mean (in a financial context)?",
+     "options": {"A": "To deposit money", "B": "To take money out of an account", "C": "To invest money", "D": "To lend money"},
+     "answer": "B", "example": "She withdrew some cash from the ATM before the trip."},
+    {"question": "What does 'a setback' mean?",
+     "options": {"A": "A big success", "B": "A problem that delays progress", "C": "A financial reward", "D": "A new plan"},
+     "answer": "B", "example": "Losing the client was a major setback for the sales team."},
+]
+
+TRANSLATE_EXERCISES = [
+    {"indonesian": "Saya belum memutuskan apakah akan menjual saham ini.",
+     "accepted": ["I haven't decided whether to sell this stock yet.",
+                  "I haven't decided if I will sell this stock."]},
+    {"indonesian": "Harga bahan makanan naik terus dalam beberapa bulan terakhir.",
+     "accepted": ["The price of groceries has kept rising over the past few months.",
+                  "Food prices have been increasing for the past few months."]},
+    {"indonesian": "Bisakah kamu jelaskan alasan di balik keputusan ini?",
+     "accepted": ["Can you explain the reason behind this decision?",
+                  "Could you explain why this decision was made?"]},
+    {"indonesian": "Kami berencana untuk memperluas bisnis ke luar negeri tahun depan.",
+     "accepted": ["We plan to expand our business abroad next year.",
+                  "We are planning to expand the business overseas next year."]},
+    {"indonesian": "Dia bekerja lembur setiap hari minggu ini.",
+     "accepted": ["He has been working overtime every day this week.",
+                  "He worked overtime every day this week."]},
+    {"indonesian": "Menurut saya, laporan ini perlu diperbaiki sebelum dikirim.",
+     "accepted": ["In my opinion, this report needs to be fixed before it's sent.",
+                  "I think this report needs to be revised before sending."]},
+    {"indonesian": "Apakah kamu punya waktu untuk rapat besok pagi?",
+     "accepted": ["Do you have time for a meeting tomorrow morning?"]},
+    {"indonesian": "Investasi ini berisiko tinggi tetapi berpotensi memberikan keuntungan besar.",
+     "accepted": ["This investment is high-risk but has the potential for a big return.",
+                  "This investment carries high risk but could bring large profits."]},
+    {"indonesian": "Saya lebih suka bekerja dari rumah daripada di kantor.",
+     "accepted": ["I prefer working from home rather than at the office.",
+                  "I'd rather work from home than at the office."]},
+    {"indonesian": "Tim kami berhasil menyelesaikan proyek itu tepat waktu.",
+     "accepted": ["Our team managed to finish the project on time.",
+                  "Our team succeeded in completing the project on time."]},
+]
+
+LESSON_MENU_TEXT = (
+    "📚 Mode Belajar Inggris\n\n"
+    "Pilih salah satu:\n"
+    "1) Grammar Practice\n"
+    "2) Vocab Quiz\n"
+    "3) Translate Practice\n"
+    "4) Free Talk (ngobrol bebas + koreksi)\n\n"
+    "Ketik angka 1-4. Ketik \"menu\" untuk kembali ke sini, "
+    "atau \"selesai\" untuk keluar kapan saja."
+)
+
+
+def _new_lesson_session() -> dict:
+    return {
+        "mode": "menu",
+        "used": {"grammar": set(), "vocab": set(), "translate": set()},
+        "current": None,
+        "history": [],
+        "score": {"correct": 0, "total": 0},
+    }
+
+
+def _call_llm(prompt: str, timeout: int = 30) -> str:
+    """Single-turn Groq call with no persona — used for grading/free-talk."""
+    try:
+        resp = requests.post(
+            GROQ_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}",
+                     "Content-Type": "application/json"},
+            json={"model": "openai/gpt-oss-120b",
+                  "messages": [{"role": "user", "content": prompt}],
+                  "max_tokens": 300, "temperature": 0.3},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        logger.warning(f"Lesson LLM call failed: {e}")
+        return ""
+
+
+def _similar(a: str, b: str) -> float:
+    norm = lambda s: re.sub(r"[^\w\s]", "", s.lower()).strip()
+    return difflib.SequenceMatcher(None, norm(a), norm(b)).ratio()
+
+
+def _pick_exercise(session: dict, kind: str, bank: list) -> dict:
+    used = session["used"][kind]
+    remaining = [i for i in range(len(bank)) if i not in used]
+    if not remaining:
+        used.clear()
+        remaining = list(range(len(bank)))
+    idx = random.choice(remaining)
+    used.add(idx)
+    return {**bank[idx], "_idx": idx}
+
+
+def _grammar_exercise_text(session: dict) -> str:
+    ex = _pick_exercise(session, "grammar", GRAMMAR_EXERCISES)
+    session["current"] = {"kind": "grammar", "data": ex}
+    return f"📝 Grammar Practice\n\nPerbaiki kalimat ini:\n\"{ex['broken']}\""
+
+
+def _vocab_exercise_text(session: dict) -> str:
+    ex = _pick_exercise(session, "vocab", VOCAB_EXERCISES)
+    session["current"] = {"kind": "vocab", "data": ex}
+    opts = "\n".join(f"{k}. {v}" for k, v in ex["options"].items())
+    return f"📖 Vocab Quiz\n\n{ex['question']}\n\n{opts}\n\nJawab dengan huruf (A/B/C/D)."
+
+
+def _translate_exercise_text(session: dict) -> str:
+    ex = _pick_exercise(session, "translate", TRANSLATE_EXERCISES)
+    session["current"] = {"kind": "translate", "data": ex}
+    return f"🔄 Translate Practice\n\nTerjemahkan ke Bahasa Inggris:\n\"{ex['indonesian']}\""
+
+
+def _next_exercise_text(session: dict) -> str:
+    mode = session["mode"]
+    if mode == "grammar":
+        return _grammar_exercise_text(session)
+    if mode == "vocab":
+        return _vocab_exercise_text(session)
+    if mode == "translate":
+        return _translate_exercise_text(session)
+    if mode == "freetalk":
+        return ("💬 Free Talk\n\nCeritakan apa saja dalam Bahasa Inggris (topik bebas) — "
+                 "saya akan koreksi kalau ada kesalahan. Mulai kapan saja!")
+    return LESSON_MENU_TEXT
+
+
+def _grade_grammar(session: dict, answer: str) -> str:
+    ex = session["current"]["data"]
+    ratio = _similar(answer, ex["correct"])
+    verdict = "✅ Betul!" if ratio > 0.9 else "🟡 Dekat, tapi belum pas." if ratio > 0.6 else "❌ Belum tepat."
+    session["score"]["total"] += 1
+    if ratio > 0.9:
+        session["score"]["correct"] += 1
+    feedback = (f"{verdict}\n\nJawaban yang benar:\n\"{ex['correct']}\"\n\n"
+                f"💡 {ex['explanation']}")
+    return f"{feedback}\n\n---\n\n{_grammar_exercise_text(session)}"
+
+
+def _grade_vocab(session: dict, answer: str) -> str:
+    ex = session["current"]["data"]
+    letter = answer.strip().upper()[:1]
+    correct = letter == ex["answer"]
+    session["score"]["total"] += 1
+    if correct:
+        session["score"]["correct"] += 1
+    verdict = ("✅ Betul!" if correct
+               else f"❌ Belum tepat. Jawaban benar: {ex['answer']}. {ex['options'][ex['answer']]}")
+    feedback = f"{verdict}\n\n✏️ Contoh: \"{ex['example']}\""
+    return f"{feedback}\n\n---\n\n{_vocab_exercise_text(session)}"
+
+
+def _grade_translate(session: dict, answer: str) -> str:
+    ex = session["current"]["data"]
+    session["score"]["total"] += 1
+    refs = "\n".join(f"- {r}" for r in ex["accepted"])
+    prompt = (
+        "You are an English tutor grading an Indonesian student's translation.\n"
+        f"Indonesian sentence: {ex['indonesian']}\n"
+        f"Reference translations:\n{refs}\n"
+        f"Student's answer: {answer}\n\n"
+        "Judge if the student's answer is correct in meaning and grammar (different "
+        "wording is fine if the meaning matches). Reply in EXACTLY this format, in "
+        "Bahasa Indonesia for the feedback line:\n"
+        "STATUS: BENAR or PERLU_PERBAIKAN\n"
+        "FEEDBACK: <1-2 short sentences explaining why>"
+    )
+    raw = _call_llm(prompt, timeout=25)
+    status_m = re.search(r"STATUS:\s*(BENAR|PERLU_PERBAIKAN)", raw, re.IGNORECASE)
+    fb_m = re.search(r"FEEDBACK:\s*(.+)", raw, re.IGNORECASE | re.DOTALL)
+
+    if not raw or not status_m:
+        best = max(_similar(answer, r) for r in ex["accepted"])
+        correct = best > 0.75
+        if correct:
+            session["score"]["correct"] += 1
+        verdict = "✅ Kelihatannya benar!" if correct else "🟡 Coba dicek lagi."
+        feedback = (f"{verdict}\n\nContoh terjemahan:\n\"{ex['accepted'][0]}\"\n\n"
+                    "(Penilaian otomatis lengkap tidak tersedia sesaat ini.)")
+    else:
+        correct = status_m.group(1).upper() == "BENAR"
+        if correct:
+            session["score"]["correct"] += 1
+        note = fb_m.group(1).strip() if fb_m else ""
+        verdict = "✅ Benar!" if correct else "🟡 Perlu diperbaiki."
+        feedback = f"{verdict} {note}\n\nContoh terjemahan:\n\"{ex['accepted'][0]}\""
+
+    return f"{feedback}\n\n---\n\n{_translate_exercise_text(session)}"
+
+
+def _handle_freetalk(session: dict, text: str) -> str:
+    session["history"].append({"role": "student", "text": text})
+    transcript = "\n".join(f"{h['role']}: {h['text']}" for h in session["history"][-8:])
+    prompt = (
+        "You are a friendly, patient English tutor chatting with an intermediate-level "
+        "Indonesian student to help them practice. Continue the conversation naturally "
+        "in English (keep it short, 1-3 sentences), then note any grammar/vocab mistakes "
+        "in the student's LAST message. Reply in EXACTLY this format:\n"
+        "REPLY: <your natural English reply continuing the conversation>\n"
+        "CORRECTION: <short feedback in Bahasa Indonesia on mistakes in the student's last "
+        "message, or 'Tidak ada kesalahan, bagus!' if it was clean>\n\n"
+        f"Conversation so far:\n{transcript}"
+    )
+    raw = _call_llm(prompt, timeout=30)
+    reply_m = re.search(r"REPLY:\s*(.+?)(?:\nCORRECTION:|$)", raw, re.IGNORECASE | re.DOTALL)
+    corr_m = re.search(r"CORRECTION:\s*(.+)", raw, re.IGNORECASE | re.DOTALL)
+
+    if not raw or not reply_m:
+        return "⚠️ Server AI sedang tidak merespon, coba lagi sebentar lagi."
+
+    reply = reply_m.group(1).strip()
+    correction = corr_m.group(1).strip() if corr_m else ""
+    session["history"].append({"role": "tutor", "text": reply})
+    return f"💬 {reply}\n\n📝 Koreksi: {correction}"
+
+
+def maybe_handle_lesson(chat_id: int, text: str) -> str | None:
+    """Returns a reply string if this message belongs to lesson mode, else
+    None so the caller falls through to Kina's normal chat handling."""
+    norm = text.strip().lower().rstrip(".!?")
+
+    if norm == LESSON_TRIGGER:
+        lesson_state[chat_id] = _new_lesson_session()
+        return LESSON_MENU_TEXT
+
+    session = lesson_state.get(chat_id)
+    if session is None:
+        return None  # not in a lesson — let normal Kina chat handle it
+
+    if norm in LESSON_EXIT_WORDS:
+        score = session["score"]
+        del lesson_state[chat_id]
+        return (f"👋 Sesi belajar selesai. Skor kamu: {score['correct']}/{score['total']} benar.\n"
+                f"Ketik \"{LESSON_TRIGGER}\" kapan saja untuk mulai lagi.")
+
+    if norm in LESSON_MENU_WORDS:
+        session["mode"] = "menu"
+        session["current"] = None
+        return LESSON_MENU_TEXT
+
+    if session["mode"] == "menu":
+        mode_map = {"1": "grammar", "2": "vocab", "3": "translate", "4": "freetalk"}
+        if norm not in mode_map:
+            return "Ketik angka 1-4 ya, atau \"selesai\" untuk keluar."
+        session["mode"] = mode_map[norm]
+        return _next_exercise_text(session)
+
+    if session["mode"] == "grammar":
+        return _grade_grammar(session, text)
+    if session["mode"] == "vocab":
+        return _grade_vocab(session, text)
+    if session["mode"] == "translate":
+        return _grade_translate(session, text)
+    if session["mode"] == "freetalk":
+        return _handle_freetalk(session, text)
+
+    return LESSON_MENU_TEXT
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
