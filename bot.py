@@ -519,8 +519,18 @@ def _call_llm(prompt: str, timeout: int = 30) -> str:
 
 
 def _similar(a: str, b: str) -> float:
-    norm = lambda s: re.sub(r"[^\w\s]", "", s.lower()).strip()
+    # Word-level (not character-level) ratio — a single changed word like
+    # "work" -> "working" barely moves a char-based ratio on a short
+    # sentence, which let wrong answers pass as correct.
+    norm = lambda s: re.sub(r"[^\w\s]", "", s.lower()).strip().split()
     return difflib.SequenceMatcher(None, norm(a), norm(b)).ratio()
+
+
+def _normalize_answer(s: str) -> str:
+    s = s.strip().strip('"').strip()
+    s = re.sub(r"[.!?]+$", "", s)          # trailing punctuation doesn't matter
+    s = re.sub(r"\s+", " ", s)
+    return s.lower()
 
 
 def _pick_exercise(session: dict, kind: str, bank: list) -> dict:
@@ -569,10 +579,16 @@ def _next_exercise_text(session: dict) -> str:
 
 def _grade_grammar(session: dict, answer: str) -> str:
     ex = session["current"]["data"]
+    # Exact-match (light normalization) — these exercises each have exactly
+    # one canonical fix, so fuzzy word-overlap alone isn't reliable: a single
+    # missing/changed word ("explain me" vs "explain to me") still scores
+    # >0.9 similarity on a short sentence and would wrongly pass.
+    exact = _normalize_answer(answer) == _normalize_answer(ex["correct"])
     ratio = _similar(answer, ex["correct"])
-    verdict = "✅ Betul!" if ratio > 0.9 else "🟡 Dekat, tapi belum pas." if ratio > 0.6 else "❌ Belum tepat."
+    correct = exact
+    verdict = "✅ Betul!" if correct else "🟡 Dekat, tapi belum pas." if ratio > 0.6 else "❌ Belum tepat."
     session["score"]["total"] += 1
-    if ratio > 0.9:
+    if correct:
         session["score"]["correct"] += 1
     feedback = (f"{verdict}\n\nJawaban yang benar:\n\"{ex['correct']}\"\n\n"
                 f"💡 {ex['explanation']}")
